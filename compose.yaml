@@ -1,0 +1,350 @@
+# Usability testing: a small shop that is hard to use on purpose, a test of it with twelve
+# people, and scripts that audit the page and read the numbers, in a JupyterLab of your own.
+#
+# Your copy is the only thing you may use, and it is the only thing you can reach: this lab
+# has no way out to the internet, so nothing you try can touch anybody else's machine.
+#
+# Two links open from the lab's page. JupyterLab is your workbench: its file editor changes the
+# shop, its terminal runs the scripts. Preview is the shop itself, served from the shop folder,
+# so you save a page in JupyterLab and refresh the Preview to see what changed. The work folder
+# holds shop/ (index.html, checkout.html and style.css), sessions.csv (12 people, 4 tasks:
+# seconds, completed, errors), sus.csv (each person's ten questionnaire answers), notes.md
+# (what the observers wrote down), start.ipynb and steps/, short scripts that do one idea each.
+# The terminal beside the lab reaches the same Python with docker exec, for example
+#   docker exec jupyter python3 steps/audit.py
+#
+# Hand in the changes you made to the shop (the three files, downloaded from JupyterLab), the
+# audit and contrast numbers before and after, and a short paragraph on which problem the test
+# found that you fixed first, and why.
+#
+# The image runs as its own unprivileged account and needs no capabilities. JupyterLab asks
+# for no token, because the platform's own door in front of it already knows who you are; do
+# not run it like this anywhere else. Nothing is saved: download your files before you stop
+# the lab, because stopping it forgets every file you made.
+
+services:
+  jupyter:
+    image: jupyter/scipy-notebook:2023-10-20
+    user: "1000:100"
+    expose: ["8888", "8000"]
+    working_dir: /home/jovyan/work
+    environment:
+      HOME: /home/jovyan
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /home/jovyan/work /tmp/lab
+        cat > /tmp/lab/make.py <<'PY'
+        import csv, json, os, random
+        from PIL import Image
+
+        os.makedirs("shop", exist_ok=True)
+        os.makedirs("steps", exist_ok=True)
+
+        # The shop. It is hard to use on purpose, in ways the lessons name one by one.
+        STYLE = """body {
+          font-family: Arial, sans-serif;
+          font-size: 11px;
+          color: #999999;
+          background: #ffffff;
+          margin: 0;
+        }
+        h1 {
+          font-size: 24px;
+          color: #222222;
+          background: #ffffff;
+        }
+        a {
+          color: #9fbfe8;
+          background: #ffffff;
+        }
+        .error {
+          color: #ff9999;
+          background: #ffffff;
+        }
+        .buy {
+          background: #f2c94c;
+          color: #ffffff;
+          width: 30px;
+          height: 18px;
+          border: 0;
+          font-size: 9px;
+        }
+        a:focus, input:focus, button:focus {
+          outline: none;
+        }
+        .shelf {
+          padding: 12px;
+        }
+        """
+
+        INDEX = """<!doctype html>
+        <html lang="en">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Teapot Corner</title>
+        <link rel="stylesheet" href="style.css">
+        </head>
+        <body>
+        <div class="shelf">
+        <img src="logo.png" alt="Teapot Corner logo">
+        <h1>Teapot Corner</h1>
+        <p>Welcome. To see our teapots <a href="#teapots">click here</a>. To see your basket
+        <a href="checkout.html">click here</a> too.</p>
+        <div id="teapots">
+        <p><img src="blue.png"> Blue teapot, 18 pounds. <a href="#blue">read more</a>
+        <button class="buy">Buy</button></p>
+        <p><img src="green.png"> Green teapot, 21 pounds. <a href="#green">read more</a>
+        <button class="buy">Buy</button></p>
+        <p><img src="red.png"> Red teapot, 24 pounds. <a href="#red">more</a>
+        <button class="buy">Buy</button></p>
+        </div>
+        <p>Tea and cups are on the way. <a href="checkout.html">Pay</a></p>
+        </div>
+        </body>
+        </html>
+        """
+
+        CHECKOUT = """<!doctype html>
+        <html lang="en">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Teapot Corner, checkout</title>
+        <link rel="stylesheet" href="style.css">
+        </head>
+        <body>
+        <div class="shelf">
+        <h1>Checkout</h1>
+        <form>
+        <p><input type="text" id="name" placeholder="Name"></p>
+        <p><input type="text" id="email" placeholder="Email"></p>
+        <p><input type="text" id="address" placeholder="Address"></p>
+        <p><label for="postcode">Postcode</label> <input type="text" id="postcode"></p>
+        <p class="error">Error 7</p>
+        <p><button class="buy" type="submit">Pay</button></p>
+        </form>
+        <p>Back to the shop: <a href="index.html">here</a></p>
+        </div>
+        </body>
+        </html>
+        """
+        for name, text in {"style.css": STYLE, "index.html": INDEX, "checkout.html": CHECKOUT}.items():
+            with open(os.path.join("shop", name), "w") as out:
+                out.write(text)
+
+        # Four small pictures for the shop, drawn here: nothing is downloaded.
+        for name, colour in {"logo": (90, 90, 90), "blue": (70, 110, 200),
+                             "green": (70, 160, 100), "red": (200, 80, 80)}.items():
+            Image.new("RGB", (60, 40), colour).save(os.path.join("shop", name + ".png"))
+
+        # The test: twelve people, four tasks, the same every time.
+        r = random.Random(648)
+        TASKS = [("find_teapot", 25, 0.97, 0.3), ("add_to_basket", 30, 0.9, 0.7),
+                 ("fill_form", 85, 0.75, 1.6), ("fix_error", 110, 0.4, 2.6)]
+        with open("sessions.csv", "w", newline="") as out:
+            w = csv.writer(out)
+            w.writerow(["participant", "task", "seconds", "completed", "errors"])
+            for p in range(1, 13):
+                slow = r.uniform(0.8, 1.35)
+                for task, base, chance, errs in TASKS:
+                    seconds = max(8, round(base * slow + r.gauss(0, base * 0.2)))
+                    done = "yes" if r.random() < chance else "no"
+                    errors = max(0, round(r.gauss(errs, 0.9)))
+                    w.writerow(["P%d" % p, task, seconds, done, errors])
+
+        # The ten-item questionnaire: answers from 1 (strongly disagree) to 5 (strongly agree).
+        # Odd items are positive statements and even items are negative ones.
+        with open("sus.csv", "w", newline="") as out:
+            w = csv.writer(out)
+            w.writerow(["participant"] + ["q%d" % n for n in range(1, 11)])
+            for p in range(1, 13):
+                mood = r.uniform(-1.2, 1.2)
+                row = []
+                for n in range(1, 11):
+                    lean = (3.2 + mood) if n % 2 == 1 else (2.6 - mood)
+                    row.append(min(5, max(1, round(lean - 0.5 + r.gauss(0, 0.8)))))
+                w.writerow(["P%d" % p] + row)
+
+        with open("notes.md", "w") as out:
+            out.write(
+                "# What the observers wrote down\n\n"
+                "- P2 leaned close to the screen: the grey text was hard to read.\n"
+                "- P3 pressed the Buy button four times before it worked.\n"
+                "- P5 said: I do not know which of the links called here goes where.\n"
+                "- P6 pressed Tab to move around the form and lost track of where they were.\n"
+                "- P8 read Error 7 aloud and asked: what is Error 7?\n"
+                "- P9 typed their name into the email box because the boxes had no labels.\n"
+                "- P11 gave up on the form and said they would shop somewhere else.\n"
+                "- P12 tried the page on a phone and could not press Buy with a thumb.\n")
+
+        def md(text):
+            return {"cell_type": "markdown", "metadata": {}, "source": text}
+
+        def code(text):
+            return {"cell_type": "code", "metadata": {}, "source": text, "outputs": [],
+                    "execution_count": None}
+
+        cells = [
+            md("# Testing the shop\n\nTwelve people each tried four tasks on the shop in the "
+               "shop folder. sessions.csv holds how long each took, whether they finished and how "
+               "many mistakes they made. sus.csv holds their answers to ten questions. Run each "
+               "cell with Shift and Enter."),
+            code("import pandas as pd\n\nsessions = pd.read_csv(\"sessions.csv\")\nsessions.head(8)"),
+            code("sessions[\"done\"] = sessions[\"completed\"] == \"yes\"\n"
+                 "sessions.groupby(\"task\").agg(success=(\"done\", \"mean\"), median_seconds=(\"seconds\", \"median\"))"),
+            code("sessions.groupby(\"task\")[\"errors\"].sum()"),
+            code("sus = pd.read_csv(\"sus.csv\")\nsus.head()"),
+            md("## Your own question\n\nAdd a cell below: does the person who took longest also give "
+               "the lowest questionnaire score, or are the two unrelated?"),
+        ]
+        book = {"cells": cells, "nbformat": 4, "nbformat_minor": 5,
+                "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3 (ipykernel)",
+                                            "language": "python"},
+                             "language_info": {"name": "python"}}}
+        with open("start.ipynb", "w") as out:
+            json.dump(book, out, indent=1)
+
+        # Short scripts the lessons' Run buttons start from the terminal, one idea each.
+        steps = {
+            "contrast.py": 'import re\n\n\n'
+                           'def light(hex_colour):\n'
+                           '    # Relative luminance: each colour channel is made linear, then weighted.\n'
+                           '    value = hex_colour.lstrip("#")\n'
+                           '    total = 0\n'
+                           '    for part, weight in zip((value[0:2], value[2:4], value[4:6]), (0.2126, 0.7152, 0.0722)):\n'
+                           '        c = int(part, 16) / 255\n'
+                           '        c = c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4\n'
+                           '        total += weight * c\n'
+                           '    return total\n\n\n'
+                           'def ratio(a, b):\n'
+                           '    lighter, darker = sorted([light(a), light(b)], reverse=True)\n'
+                           '    return (lighter + 0.05) / (darker + 0.05)\n\n\n'
+                           'css = open("shop/style.css").read()\n'
+                           'for selector, body in re.findall(r"([^{}]+)\\{([^}]*)\\}", css):\n'
+                           '    fore = re.search(r"(?<![-a-z])color:\\s*(#[0-9a-fA-F]{6})", body)\n'
+                           '    back = re.search(r"background:\\s*(#[0-9a-fA-F]{6})", body)\n'
+                           '    if fore and back:\n'
+                           '        n = ratio(fore.group(1), back.group(1))\n'
+                           '        verdict = "enough" if n >= 4.5 else "too low"\n'
+                           '        print(selector.strip().ljust(8), fore.group(1), "on", back.group(1), "ratio", round(n, 2), verdict)\n',
+            "audit.py": 'import re\n'
+                        'from html.parser import HTMLParser\n\n'
+                        'VAGUE = {"click here", "here", "read more", "more", "link", "this"}\n\n\n'
+                        'class Page(HTMLParser):\n'
+                        '    def __init__(self):\n'
+                        '        super().__init__()\n'
+                        '        self.images = self.no_alt = self.inputs = self.no_label = 0\n'
+                        '        self.links = self.vague = 0\n'
+                        '        self.labels_for = set()\n'
+                        '        self.input_ids = []\n'
+                        '        self.in_link = False\n'
+                        '        self.text = ""\n'
+                        '        self.errors = []\n'
+                        '        self.in_error = False\n\n'
+                        '    def handle_starttag(self, tag, attrs):\n'
+                        '        a = dict(attrs)\n'
+                        '        if tag == "img":\n'
+                        '            self.images += 1\n'
+                        '            if not a.get("alt"):\n'
+                        '                self.no_alt += 1\n'
+                        '        if tag == "label" and a.get("for"):\n'
+                        '            self.labels_for.add(a["for"])\n'
+                        '        if tag == "input" and a.get("type") != "hidden":\n'
+                        '            self.inputs += 1\n'
+                        '            self.input_ids.append((a.get("id"), a.get("aria-label")))\n'
+                        '        if tag == "a":\n'
+                        '            self.links += 1\n'
+                        '            self.in_link = True\n'
+                        '            self.text = ""\n'
+                        '        if a.get("class") == "error":\n'
+                        '            self.in_error = True\n'
+                        '            self.errors.append("")\n\n'
+                        '    def handle_data(self, data):\n'
+                        '        if self.in_link:\n'
+                        '            self.text += data\n'
+                        '        if self.in_error:\n'
+                        '            self.errors[-1] += data\n\n'
+                        '    def handle_endtag(self, tag):\n'
+                        '        if tag == "a":\n'
+                        '            self.in_link = False\n'
+                        '            if " ".join(self.text.lower().split()) in VAGUE:\n'
+                        '                self.vague += 1\n'
+                        '        if tag == "p":\n'
+                        '            self.in_error = False\n\n\n'
+                        'for name in ["index.html", "checkout.html"]:\n'
+                        '    page = Page()\n'
+                        '    page.feed(open("shop/" + name).read())\n'
+                        '    for ident, aria in page.input_ids:\n'
+                        '        if not aria and ident not in page.labels_for:\n'
+                        '            page.no_label += 1\n'
+                        '    codes = sum(1 for e in page.errors if re.fullmatch(r"\\s*Error \\d+\\s*", e))\n'
+                        '    print(name)\n'
+                        '    print("  images without alt text:", page.no_alt, "of", page.images)\n'
+                        '    print("  inputs without a label:", page.no_label, "of", page.inputs)\n'
+                        '    print("  links with vague text:", page.vague, "of", page.links)\n'
+                        '    print("  error messages that are only a code:", codes)\n'
+                        'css = open("shop/style.css").read()\n'
+                        'print("style.css")\n'
+                        'print("  rules that remove the focus outline:", len(re.findall(r"outline:\\s*(none|0)", css)))\n'
+                        'sizes = [int(n) for n in re.findall(r"font-size:\\s*(\\d+)px", css)]\n'
+                        'print("  font sizes under 14 px:", sum(1 for n in sizes if n < 14), "of", len(sizes))\n',
+            "tasks.py": 'import pandas as pd\n\n'
+                        'sessions = pd.read_csv("sessions.csv")\n'
+                        'sessions["done"] = sessions["completed"] == "yes"\n'
+                        'table = sessions.groupby("task").agg(success=("done", "mean"), median_seconds=("seconds", "median"))\n'
+                        'table["success"] = (table["success"] * 100).round(0)\n'
+                        'print(table.rename(columns={"success": "success_percent"}).loc[["find_teapot", "add_to_basket", "fill_form", "fix_error"]])\n',
+            "sus.py": 'import pandas as pd\n\n'
+                      'sus = pd.read_csv("sus.csv")\n'
+                      'score = []\n'
+                      'for _, row in sus.iterrows():\n'
+                      '    total = 0\n'
+                      '    for n in range(1, 11):\n'
+                      '        answer = row["q" + str(n)]\n'
+                      '        total += (answer - 1) if n % 2 == 1 else (5 - answer)\n'
+                      '    score.append(total * 2.5)\n'
+                      'sus["score"] = score\n'
+                      'print(sus[["participant", "score"]].to_string(index=False))\n'
+                      'print("mean score:", round(sus["score"].mean(), 1))\n',
+            "errors.py": 'import pandas as pd\n\n'
+                         'sessions = pd.read_csv("sessions.csv")\n'
+                         'total = sessions.groupby("task")["errors"].sum().sort_values(ascending=False)\n'
+                         'print(total)\n'
+                         'print("most errors:", total.index[0])\n',
+            "fix.py": 'import runpy\n\n'
+                      'print("Nothing is fixed here. Edit the files in shop/, save them, and run this again.")\n'
+                      'runpy.run_path("steps/audit.py")\n'
+                      'print("contrast")\n'
+                      'runpy.run_path("steps/contrast.py")\n',
+        }
+        for name, text in steps.items():
+            with open(os.path.join("steps", name), "w") as out:
+                out.write(text)
+        PY
+        cd /home/jovyan/work
+        python3 /tmp/lab/make.py
+        python3 -m http.server 8000 --directory /home/jovyan/work/shop > /tmp/lab/preview.log 2>&1 &
+        exec jupyter lab --no-browser --ip=0.0.0.0 --port=8888 \
+          --ServerApp.root_dir=/home/jovyan/work \
+          --IdentityProvider.token= --ServerApp.password= \
+          '--ServerApp.allow_origin=*' --ServerApp.allow_remote_access=True \
+          --LabApp.check_for_updates_class=jupyterlab.NeverCheckForUpdate \
+          --LabApp.news_url=None
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/api', timeout=3); urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    labels:
+      lab.title: JupyterLab, and the shop Preview on the second link
+      lab.open: "8888,8000"
