@@ -1,5 +1,7 @@
 # Usability testing lab with Docker Compose: a shop that is hard to use on purpose, a test with twelve people and the numbers
 
+[English](README.md) | [Français](README.fr.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+
 [![check](https://github.com/mitsurutech/lab-usability/actions/workflows/check.yml/badge.svg)](https://github.com/mitsurutech/lab-usability/actions/workflows/check.yml)
 
 A ready-made lab for classrooms, from the [MitsuruTech Learning Platform](https://mitsurutech.co.uk/learning), where schools, colleges and universities give every student their own databases, containers and terminal in the browser. It is a small shop page that is hard to use on purpose, a test of it with twelve people, and scripts that audit the page and read the numbers.
@@ -33,6 +35,14 @@ Open <http://127.0.0.1:8888/lab>, and the page being worked on at <http://127.0.
 ## What does not work in a lab
 
 The lab has no way out to the internet, so nothing can be installed or downloaded into it. **Nothing is saved**: stopping the lab forgets every file, so a student downloads their work before they stop it. The comment at the top of `compose.yaml` says what the lab is and what it is not.
+
+## Checking the lab
+
+`test/check.sh` starts the lab the way the platform's runner starts every service (all capabilities dropped, `no-new-privileges`, a process limit, memory limits, and no way out to the internet) and then checks that the lab does what its compose file says. It needs Docker and runs on every push, which is the badge at the top.
+
+```bash
+test/check.sh
+```
 
 ## Licence
 
